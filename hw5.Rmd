@@ -1,5 +1,6 @@
 ---
 title: "hw5.Rmd"
+author: "Sonya Haan"
 output: html_document
 ---
 
@@ -7,22 +8,90 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
-
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
-
-```{r cars}
-summary(cars)
+(@) Load data
+```{r}
+if (file.exists("alcohol.rds")) {
+  data <- readRDS("alcohol.rds")
+} else {
+  url <- "https://xdaiisu.github.io/ds202materials/data/ames.csv"
+  data <- readr::read_csv(url)
+  saveRDS(data, file="alcohol.rds")
+} 
 ```
 
-## Including Plots
+(@) Data cleaning
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
 
-You can also embed plots, for example:
+data <- data %>% separate(`Store Location`, into=c('Store Address', 'Store City and ZIP', 'Geographic Location (Latitude, Longitude)'), sep='\n')
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+data <- data %>% select(-`Store City and ZIP`)
+
+data <- data %>% separate(`Geographic Location (Latitude, Longitude)`, into=c('Latitude','Longitude'), sep=", ") %>% mutate('Latitude'=substring(Latitude, 2), 'Longitude'=substr(Longitude, 1, nchar(Longitude)-1))
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+`Store Location` contains 3 different pieces of information, so we separate it into 3 different columns. We can drop the second column (`Store City and ZIP`) as it is redundant information. The store's geographical location is stored in the `Geographic Location (Latitude, Longitude)` column. We can further split `Geographic Location (Latitude, Longitude)` into separate `Latitude` and `Longitude` columns.
+
+```{r}
+summary(data)
+data$Date <- mdy(data$Date)
+data$`Store Name` <- factor(data$`Store Name`)
+data$Latitude <- as.numeric(data$Latitude)
+data$Longitude <- as.numeric(data$Longitude)
+data$`Category Name` <- factor(data$`Category Name`)
+data$`Vendor Name` <- factor(data$`Vendor Name`)
+```
+
+Convert variables to appropriate type.
+
+```{r}
+data <- data %>% mutate('Year'=year(Date), 'Month'=month(Date), 'Day'=day(Date))
+```
+
+Extract year, month, and day from the variable `Date` and store them in their own columns.
+
+(@) First overview
+```{r}
+data %>% ggplot(aes(x=Longitude, y=Latitude)) + geom_point() + ggtitle('Store Locations')
+```
+
+```{r}
+data %>% ggplot(aes(x=`Category Name`, y=`Volume Sold (Liters)`)) + geom_boxplot() + facet_wrap(~`Category Name`)
+```
+
+Visualizing the volume sold of of liquor categories at once is difficult because there are 124 categories! Create separate visualizations comparing liquor categories of the same type (vodkas, rums, gins, etc).
+
+```{r}
+library(stringr)
+rum <- data %>% filter(str_detect(`Category Name`, 'Rum'))
+rum %>% ggplot(aes(x=`Category Name`, y=`Volume Sold (Liters)`)) + geom_boxplot() + ggtitle('Rum Category Sales by Volume')
+
+gin <- data %>% filter(str_detect(`Category Name`, 'Gin|Gins'))
+gin %>% ggplot(aes(x=`Category Name` ,y=`Volume Sold (Liters)`)) + geom_boxplot() + ggtitle('Gin Category Sales by Volume')
+
+vodka <- data %>% filter(str_detect(`Category Name`, 'Vodka|Vodkas'))
+vodka %>% ggplot(aes(x=`Volume Sold (Liters)` ,y=`Category Name`)) + geom_boxplot() + ggtitle('Vodka Category Sales by Volume')
+```
+
+(@) Find the daily sales liquor sales in Ames in 2018
+
+```{r}
+ames2018 <- data %>% filter(Year==2018)
+ames2018 %>% group_by(Month, Day)  %>% summarize( 
+          numSales = n(), 
+          volSold = sum(`Volume Sold (Liters)`, na.rm = TRUE),
+          moneySpent = sum(`Sale (Dollars)`, na.rm = TRUE)
+)
+```
+
+Find the daily sales liquor sales in Ames in 2018. Summarize number of sales, volume of liquor sold and amount of money spent. 
+
+```{r}
+ames2018 %>% ggplot(aes(x=Day, y=`Volume Sold (Liters)`)) + geom_point() + facet_wrap(~Month) + ggtitle('Volume Sold per Day (Ames 2018)')
+````
+
+The first thing I noticed was that the data does not appear to be collected every day -- some days in the scatterplots have no data plotted. Besides that, the scatterplots show days where the volume sold spikes, which after comparing these spikes to a 2018 calendar, corresponded to Wednesdays. (This is not what I would have expected, I thought weekends would be the days with highest volumes.)
+
+Most ISU home football games occured in September and October, and unfortunately this data is missing. November 10th, November 24th, and December 1st are dates of ISU home football games which we have data for (at least the days surrounding these games because the data does not appear to be collected every day). It appears that a few days before the two November games, volumes were slightly higher, though a significant pattern is not evident.
